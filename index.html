@@ -110,15 +110,35 @@ main {
   padding: 2px 1px;
 }
 .file-tabs.visible { display: flex; }
+.file-tab-wrap {
+  display: inline-flex;
+  max-width: 280px;
+  align-items: stretch;
+}
 .file-tab {
   min-width: 120px;
   max-width: 240px;
   justify-content: flex-start;
   white-space: nowrap;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .file-tab span {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.tab-close {
+  width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 9px 9px 0;
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+.tab-close:hover {
+  color: var(--danger);
+  background: var(--accent-soft);
 }
 .toolbar-row + .toolbar-row {
   margin-top: 8px;
@@ -278,21 +298,98 @@ td.index { font-size: 12px; }
   box-shadow: 1px 0 0 var(--border);
 }
 .freeze-column tr:hover td.index { background: var(--accent-soft); }
-.freeze-end-column th.tail,
-.freeze-end-column td.tail {
+.freeze-selected-column th.frozen,
+.freeze-selected-column td.frozen {
   position: sticky;
-  right: 0;
   z-index: 3;
 }
-.freeze-end-column th.tail {
+.freeze-selected-column th.frozen {
   z-index: 7;
   background: var(--surface-soft);
 }
-.freeze-end-column td.tail {
+.freeze-selected-column td.frozen {
   background: var(--surface);
-  box-shadow: -1px 0 0 var(--border);
+  box-shadow: -1px 0 0 var(--border), -18px 0 24px rgba(22, 31, 48, 0.08);
 }
-.freeze-end-column tr:hover td.tail { background: var(--accent-soft); }
+.freeze-selected-column tr:hover td.frozen { background: var(--accent-soft); }
+.cell-link {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 3px;
+  color: var(--accent);
+  text-decoration: none;
+  vertical-align: bottom;
+}
+.cell-link:hover { text-decoration: underline; }
+.freeze-dropdown {
+  position: relative;
+}
+.freeze-dropdown summary {
+  display: inline-flex;
+  min-height: 32px;
+  min-width: 148px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  color: var(--text);
+  list-style: none;
+  cursor: pointer;
+}
+.freeze-dropdown summary::-webkit-details-marker { display: none; }
+.freeze-dropdown summary::after {
+  color: var(--muted);
+  content: "▾";
+  font-size: 11px;
+}
+.freeze-dropdown[open] summary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.freeze-dropdown[open] summary::after { content: "▴"; }
+.freeze-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 25;
+  display: grid;
+  width: min(300px, calc(100vw - 24px));
+  max-height: min(48vh, 360px);
+  overflow: auto;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.freeze-menu label {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 5px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.freeze-menu label:hover { background: var(--accent-soft); }
+.freeze-menu span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.freeze-empty {
+  padding: 6px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
 .wrap td:not(.index) {
   white-space: pre-wrap;
   word-break: break-word;
@@ -421,7 +518,10 @@ td.index { font-size: 12px; }
         <button class="btn" id="btnWrap">换行</button>
         <button class="btn active" id="btnFreezeHeader">冻结首行</button>
         <button class="btn" id="btnFreezeColumn">冻结首列</button>
-        <button class="btn" id="btnFreezeEndColumn">冻结尾列</button>
+        <details class="freeze-dropdown" id="freezeColumnDropdown">
+          <summary><span id="freezeSummary">冻结列</span></summary>
+          <div class="freeze-menu" id="freezeColumnList"></div>
+        </details>
         <label>字号 <input id="fontRange" type="range" min="85" max="135" value="100"></label>
         <label>行距
           <select id="rowDensity">
@@ -516,7 +616,7 @@ td.index { font-size: 12px; }
     wrap: false,
     freezeHeader: true,
     freezeColumn: false,
-    freezeEndColumn: false,
+    frozenColumnPaths: [],
     dirty: false,
     editing: null,
   };
@@ -541,7 +641,8 @@ td.index { font-size: 12px; }
     btnWrap: $('#btnWrap'),
     btnFreezeHeader: $('#btnFreezeHeader'),
     btnFreezeColumn: $('#btnFreezeColumn'),
-    btnFreezeEndColumn: $('#btnFreezeEndColumn'),
+    freezeSummary: $('#freezeSummary'),
+    freezeColumnList: $('#freezeColumnList'),
     fileInput: $('#fileInput'),
     toast: $('#toast'),
     editorBackdrop: $('#editorBackdrop'),
@@ -626,6 +727,7 @@ td.index { font-size: 12px; }
       sort: { path: '', dir: '' },
       page: 1,
       pageSize: state.pageSize,
+      frozenColumnPaths: [],
       dirty: false,
     };
   }
@@ -647,6 +749,7 @@ td.index { font-size: 12px; }
     doc.sort = state.sort;
     doc.page = state.page;
     doc.pageSize = state.pageSize;
+    doc.frozenColumnPaths = state.frozenColumnPaths;
     doc.dirty = state.dirty;
   }
 
@@ -665,10 +768,50 @@ td.index { font-size: 12px; }
     state.sort = doc.sort;
     state.page = doc.page;
     state.pageSize = doc.pageSize;
+    state.frozenColumnPaths = doc.frozenColumnPaths || [];
     state.dirty = doc.dirty;
     dom.searchInput.value = state.search;
     dom.pageSize.value = String(state.pageSize);
     render();
+  }
+
+  function closeDocument(docId) {
+    syncActiveDoc();
+    const index = state.docs.findIndex((doc) => doc.id === docId);
+    if (index < 0) return;
+    const doc = state.docs[index];
+    if (doc.dirty && !window.confirm('关闭未保存的文件 "' + doc.fileName + '"？')) return;
+
+    const closingActive = state.activeDocId === docId;
+    state.docs.splice(index, 1);
+
+    if (!state.docs.length) {
+      state.activeDocId = null;
+      state.fileName = '';
+      state.handle = null;
+      state.rows = [];
+      state.columns = [];
+      state.filtered = [];
+      state.filters = [];
+      state.search = '';
+      state.sort = { path: '', dir: '' };
+      state.page = 1;
+      state.frozenColumnPaths = [];
+      state.dirty = false;
+      dom.searchInput.value = '';
+      render();
+      showToast('已关闭 ' + doc.fileName);
+      return;
+    }
+
+    if (closingActive) {
+      state.activeDocId = null;
+      const nextDoc = state.docs[Math.min(index, state.docs.length - 1)];
+      activateDocument(nextDoc.id);
+    } else {
+      render();
+    }
+    showToast('已关闭 ' + doc.fileName);
   }
 
   function parsePath(path) {
@@ -831,7 +974,6 @@ td.index { font-size: 12px; }
     dom.btnWrap.classList.toggle('active', state.wrap);
     dom.btnFreezeHeader.classList.toggle('active', state.freezeHeader);
     dom.btnFreezeColumn.classList.toggle('active', state.freezeColumn);
-    dom.btnFreezeEndColumn.classList.toggle('active', state.freezeEndColumn);
     dom.fileMeta.textContent = state.rows.length ? state.fileName + ' · ' + state.rows.length + ' 行 · ' + state.columns.length + ' 列' + (state.dirty ? ' · 有未保存修改' : '') : '未打开文件 · 单 HTML 离线版';
     renderTabs();
     renderFilters();
@@ -843,10 +985,16 @@ td.index { font-size: 12px; }
     dom.fileTabs.innerHTML = state.docs.map((doc) => {
       const active = doc.id === state.activeDocId ? ' active' : '';
       const dirty = doc.dirty ? ' *' : '';
-      return '<button class="btn file-tab' + active + '" data-doc="' + escapeAttr(doc.id) + '" title="' + escapeAttr(doc.fileName) + '"><span>' + escapeHtml(doc.fileName + dirty) + '</span></button>';
+      return '<span class="file-tab-wrap"><button class="btn file-tab' + active + '" data-doc="' + escapeAttr(doc.id) + '" title="' + escapeAttr(doc.fileName) + '"><span>' + escapeHtml(doc.fileName + dirty) + '</span></button><button class="tab-close" data-close-doc="' + escapeAttr(doc.id) + '" title="关闭 ' + escapeAttr(doc.fileName) + '" aria-label="关闭 ' + escapeAttr(doc.fileName) + '">x</button></span>';
     }).join('');
     dom.fileTabs.querySelectorAll('[data-doc]').forEach((button) => {
       button.addEventListener('click', () => activateDocument(button.dataset.doc));
+    });
+    dom.fileTabs.querySelectorAll('[data-close-doc]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        closeDocument(button.dataset.closeDoc);
+      });
     });
   }
 
@@ -858,6 +1006,22 @@ td.index { font-size: 12px; }
 
   function renderFilters() {
     dom.filterColumn.innerHTML = state.columns.map((column) => '<option value="' + escapeAttr(column.path) + '">' + escapeHtml(column.label) + '</option>').join('');
+    const visibleColumns = state.columns.filter((column) => column.visible);
+    const visiblePaths = new Set(visibleColumns.map((column) => column.path));
+    state.frozenColumnPaths = state.frozenColumnPaths.filter((path) => visiblePaths.has(path));
+    dom.freezeSummary.textContent = getFreezeSummary();
+    dom.freezeColumnList.innerHTML = visibleColumns.length
+      ? visibleColumns.map((column) => '<label title="' + escapeAttr(column.label) + '"><input type="checkbox" data-freeze-column="' + escapeAttr(column.path) + '"' + (state.frozenColumnPaths.includes(column.path) ? ' checked' : '') + '><span>' + escapeHtml(column.label) + '</span></label>').join('')
+      : '<div class="freeze-empty">无可见列</div>';
+    dom.freezeColumnList.querySelectorAll('[data-freeze-column]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const path = input.dataset.freezeColumn;
+        state.frozenColumnPaths = input.checked
+          ? Array.from(new Set([...state.frozenColumnPaths, path]))
+          : state.frozenColumnPaths.filter((item) => item !== path);
+        render();
+      });
+    });
     dom.filterTags.innerHTML = state.filters.map((filter, index) => '<span class="filter-tag">' + escapeHtml(filter.path + ' ' + opLabel(filter.op) + ' ' + filter.value) + '<button class="tag-x" data-filter="' + index + '">x</button></span>').join('');
     dom.filterTags.querySelectorAll('[data-filter]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -868,6 +1032,12 @@ td.index { font-size: 12px; }
     });
   }
 
+  function getFreezeSummary() {
+    if (!state.frozenColumnPaths.length) return '冻结列';
+    if (state.frozenColumnPaths.length === 1) return '冻结：' + state.frozenColumnPaths[0];
+    return '冻结 ' + state.frozenColumnPaths.length + ' 列';
+  }
+
   function renderTable() {
     const pageSize = state.pageSize;
     const totalPages = Math.max(1, Math.ceil(state.filtered.length / pageSize));
@@ -875,27 +1045,30 @@ td.index { font-size: 12px; }
     const start = (state.page - 1) * pageSize;
     const pageIndexes = state.filtered.slice(start, start + pageSize);
     const visibleColumns = state.columns.filter((column) => column.visible);
+    const visibleFrozenColumns = getVisibleFrozenColumns(visibleColumns);
     const tableWidth = 52 + visibleColumns.reduce((sum, column) => sum + column.width, 0);
     const colgroup = '<col style="width:52px">' + visibleColumns.map((column) => '<col style="width:' + column.width + 'px">').join('');
-    const thead = '<thead><tr><th class="index">#</th>' + visibleColumns.map((column, columnIndex) => {
+    const thead = '<thead><tr><th class="index">#</th>' + visibleColumns.map((column) => {
       const classes = [];
       if (state.sort.path === column.path) classes.push('sorted');
-      if (state.freezeEndColumn && columnIndex === visibleColumns.length - 1) classes.push('tail');
+      if (visibleFrozenColumns.includes(column)) classes.push('frozen');
+      const frozenStyle = getFrozenColumnStyle(column, visibleColumns, visibleFrozenColumns);
       const arrow = state.sort.path === column.path ? (state.sort.dir === 'asc' ? '↑' : '↓') : '↕';
-      return '<th class="' + classes.join(' ') + '" data-path="' + escapeAttr(column.path) + '"><button class="th-button" data-sort="' + escapeAttr(column.path) + '"><span class="th-label">' + escapeHtml(column.label) + '</span><span>' + arrow + '</span></button><button class="resizer" data-resize="' + escapeAttr(column.path) + '" title="拖拽调整列宽，双击恢复"></button></th>';
+      return '<th class="' + classes.join(' ') + '" data-path="' + escapeAttr(column.path) + '"' + frozenStyle + '><button class="th-button" data-sort="' + escapeAttr(column.path) + '"><span class="th-label">' + escapeHtml(column.label) + '</span><span>' + arrow + '</span></button><button class="resizer" data-resize="' + escapeAttr(column.path) + '" title="拖拽调整列宽，双击恢复"></button></th>';
     }).join('') + '</tr></thead>';
     const tbody = '<tbody>' + pageIndexes.map((rowIndex) => {
       const row = state.rows[rowIndex];
-      return '<tr><td class="index">' + (rowIndex + 1) + '</td>' + visibleColumns.map((column, columnIndex) => {
+      return '<tr><td class="index">' + (rowIndex + 1) + '</td>' + visibleColumns.map((column) => {
         const value = getValueAtPath(row, column.path);
-        const tail = state.freezeEndColumn && columnIndex === visibleColumns.length - 1 ? ' class="tail"' : '';
-        return '<td' + tail + ' data-row="' + rowIndex + '" data-path="' + escapeAttr(column.path) + '" title="' + escapeAttr(formatValue(value)) + '">' + escapeHtml(formatValue(value)) + '</td>';
+        const frozen = visibleFrozenColumns.includes(column) ? ' class="frozen"' : '';
+        const frozenStyle = getFrozenColumnStyle(column, visibleColumns, visibleFrozenColumns);
+        return '<td' + frozen + frozenStyle + ' data-row="' + rowIndex + '" data-path="' + escapeAttr(column.path) + '" title="' + escapeAttr(formatValue(value)) + '">' + linkifyText(formatValue(value)) + '</td>';
     }).join('') + '</tr>';
     }).join('') + '</tbody>';
     dom.tableWrap.classList.toggle('wrap', state.wrap);
     dom.tableWrap.classList.toggle('freeze-header', state.freezeHeader);
     dom.tableWrap.classList.toggle('freeze-column', state.freezeColumn);
-    dom.tableWrap.classList.toggle('freeze-end-column', state.freezeEndColumn);
+    dom.tableWrap.classList.toggle('freeze-selected-column', visibleFrozenColumns.length > 0);
     dom.tableWrap.innerHTML = '<table style="width:' + tableWidth + 'px"><colgroup>' + colgroup + '</colgroup>' + thead + tbody + '</table>';
     dom.stats.textContent = '显示 ' + state.filtered.length + ' / ' + state.rows.length + ' 行 · ' + visibleColumns.length + ' / ' + state.columns.length + ' 列';
     dom.pageInfo.textContent = '第 ' + state.page + ' / ' + totalPages + ' 页';
@@ -911,6 +1084,9 @@ td.index { font-size: 12px; }
         else state.sort = { path: '', dir: '' };
         render();
       });
+    });
+    dom.tableWrap.querySelectorAll('.cell-link').forEach((link) => {
+      link.addEventListener('dblclick', (event) => event.stopPropagation());
     });
     dom.tableWrap.querySelectorAll('td[data-path]').forEach((cell) => {
       cell.addEventListener('dblclick', () => openEditor(Number(cell.dataset.row), cell.dataset.path));
@@ -951,6 +1127,20 @@ td.index { font-size: 12px; }
       handle.addEventListener('pointerup', up);
       handle.addEventListener('pointercancel', up);
     });
+  }
+
+  function getVisibleFrozenColumns(visibleColumns) {
+    const selected = new Set(state.frozenColumnPaths);
+    return visibleColumns.filter((column) => selected.has(column.path));
+  }
+
+  function getFrozenColumnStyle(column, visibleColumns, visibleFrozenColumns) {
+    if (!visibleFrozenColumns.includes(column)) return '';
+    const columnIndex = visibleColumns.indexOf(column);
+    const offset = visibleColumns.slice(columnIndex + 1).reduce((sum, nextColumn) => (
+      visibleFrozenColumns.includes(nextColumn) ? sum + nextColumn.width : sum
+    ), 0);
+    return ' style="right:' + Math.max(0, Math.round(offset)) + 'px"';
   }
 
   function openEditor(rowIndex, path) {
@@ -1040,6 +1230,27 @@ td.index { font-size: 12px; }
     return escapeHtml(text).replace(/`/g, '&#96;');
   }
 
+  const linkPattern = /\b(?:https?:\/\/[^\s<>"'，。；：！？（）]+|mailto:[^\s<>"'，。；：！？（）]+)/gi;
+  const trailingPunctuationPattern = /[),.;:!?，。；：！？）]+$/;
+
+  function linkifyText(text) {
+    const value = String(text);
+    let html = '';
+    let cursor = 0;
+    for (const match of value.matchAll(linkPattern)) {
+      const raw = match[0];
+      const start = match.index || 0;
+      const trailing = (raw.match(trailingPunctuationPattern) || [''])[0];
+      const linkText = trailing ? raw.slice(0, -trailing.length) : raw;
+      if (!linkText) continue;
+      html += escapeHtml(value.slice(cursor, start));
+      html += '<a class="cell-link" href="' + escapeAttr(linkText) + '" target="_blank" rel="noreferrer" title="打开链接">' + escapeHtml(linkText) + '<span aria-hidden="true">↗</span></a>';
+      cursor = start + linkText.length;
+    }
+    html += escapeHtml(value.slice(cursor));
+    return html;
+  }
+
   let toastTimer = 0;
   function showToast(text) {
     dom.toast.textContent = text;
@@ -1094,11 +1305,6 @@ td.index { font-size: 12px; }
   $('#btnFreezeColumn').addEventListener('click', () => {
     state.freezeColumn = !state.freezeColumn;
     dom.btnFreezeColumn.classList.toggle('active', state.freezeColumn);
-    render();
-  });
-  $('#btnFreezeEndColumn').addEventListener('click', () => {
-    state.freezeEndColumn = !state.freezeEndColumn;
-    dom.btnFreezeEndColumn.classList.toggle('active', state.freezeEndColumn);
     render();
   });
   $('#fontRange').addEventListener('input', (event) => {
